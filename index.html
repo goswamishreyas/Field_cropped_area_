@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Field monitoring</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    #map {
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .legend {
+      line-height: 18px;
+      color: #555;
+      background: #e3e2e2;
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+    }
+
+    .legend-title {
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .legend-scale {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-color-box {
+      width: 20px;
+      height: 15px;
+      border: 1px solid #aaa;
+    }
+  </style>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.4.0/chart.min.js"></script>
+  <script src="static/leaflet-geotiff/leaflet-geotiff.js"></script>
+  <script src="static/leaflet-geotiff/leaflet-geotiff-plotty.js"></script>
+  <script src="static/geotiff.js"></script>  
+  <script src="static/plotty/dist/plotty.min.js"></script>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script>
+    // Base layers
+    let google_sat = L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&key=AIzaSyA5sYadpLcoOTM2irEsfD4HdA0SyE-n5Eg', {
+      maxZoom: 19,
+      attribution: 'Map data &copy; <a href="https://www.google.com/intl/en_us/help/terms_maps.html">Google</a>',
+      subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+    });
+
+    let osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    });
+
+    // Plotty color scale for SAVI
+    plotty.addColorScale('ndvi_diff_scale', ['#52e03c'], [1.0]);
+
+    const normalized_options = {
+      band: 0,
+      renderer: L.LeafletGeotiff.plotty({
+        displayMin: 0,
+        clampLow: true,
+        displayMax: 1,
+        colorScale: 'ndvi_diff_scale'
+      })
+    };
+
+    const currentLayer = L.leafletGeotiff('static/images/Crop_mask.tif', normalized_options);
+
+    // Map initialization
+    const map = L.map("map", {
+      center: [29.87481, 77.97885],
+      zoom: 14,
+      layers: [osm, google_sat]
+    });
+
+    osm.setZIndex(900);
+    google_sat.setZIndex(950);
+    currentLayer.setZIndex(1000);
+
+    map.whenReady(() => {
+      currentLayer.addTo(map);
+      map.invalidateSize();
+    });
+
+    // Layer controls setup
+    const baseMaps = {
+      'OSM': osm,
+      'Google Satellite': google_sat
+    };
+
+    const overlayMaps = {
+      'Cropped Area': currentLayer
+    };
+
+    const layerControl = L.control.layers(baseMaps, overlayMaps).addTo(map);
+    L.control.scale().addTo(map);
+
+    // Legend
+    const legend = L.control({ position: "bottomright" });
+    legend.onAdd = function (map) {
+      const div = L.DomUtil.create("div", "legend");
+      div.innerHTML += `<div class="legend-title">Legend</div>`;
+      div.innerHTML += `
+        <div class="legend-scale">  
+          <div class="legend-item">
+            <div class="legend-color-box" style="background:#52e03c;"></div>
+            <span>Cropped Area</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color-box" style="background:none; border: 2px solid yellow;"></div>
+            <span>Field Boundary</span>
+          </div>
+        </div>
+      `;
+      return div;
+    };
+    legend.addTo(map);
+
+    // GeoJSON field boundaries layer with popups
+    fetch("static/merged_aoi.geojson")
+      .then(response => response.json())
+      .then(data => {
+        const geojsonLayer = L.geoJSON(data, {
+          style: {
+            color: 'yellow',
+            weight: 2,
+            fillOpacity: 0
+          },
+          onEachFeature: function (feature, layer) {
+            if (feature.properties && feature.properties.Cropped !== undefined) {
+              const value = feature.properties.Cropped;
+              layer.bindPopup(`<b>Cropped Area %:</b> ${value}`);
+            } else {
+              layer.bindPopup("No cropped value");
+            }
+          }
+        });
+
+        geojsonLayer.addTo(map);  // Show on map by default
+        overlayMaps['Field Boundaries'] = geojsonLayer;
+        layerControl.addOverlay(geojsonLayer, 'Field Boundary');
+      });
+  </script>
+</body>
+</html>
